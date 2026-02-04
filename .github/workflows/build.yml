@@ -37,7 +37,27 @@ jobs:
           $dll = Get-ChildItem -Path out/build -Recurse -Filter libnode.dll -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $dll) { Write-Error "libnode.dll not found"; exit 1 }
           Write-Host "Found libnode.dll at $($dll.FullName)"
+          - name: Cache Node.js v22.21.1 source
+            uses: actions/cache@v4
+            with:
+              path: out/cache/node-v22.21.1
+              key: node-source-v22.21.1
 
+          - name: Ensure Node.js v22.21.1 source is present
+            shell: pwsh
+            run: |
+              $dst = 'out/cache/node-v22.21.1'
+              if (-not (Test-Path $dst)) {
+            New-Item -ItemType Directory -Path $dst | Out-Null
+            Write-Host "Downloading Node.js v22.21.1 source..."
+            $url = 'https://nodejs.org/dist/v22.21.1/node-v22.21.1.tar.gz'
+            $archive = 'node-v22.21.1.tar.gz'
+            Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+            tar -xzf $archive -C $dst --strip-components=1
+            Remove-Item $archive
+              } else {
+            Write-Host "Node.js source restored from cache: $dst"
+              }
       - name: Upload libnode.dll artifact
         uses: actions/upload-artifact@v4
         with:
