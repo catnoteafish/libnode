@@ -1,74 +1,45 @@
-name: Build libnode
+name: Build libnode.dll for Windows
+
 on:
   push:
-    branches: [main] 
-  workflow_dispatch: 
+  pull_request:
 
 jobs:
-  build-libnode:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        node_version: [v20.17.0]
-        arch: [x64] 
+  build-windows:
+    runs-on: windows-latest
+    env:
+      CONFIG: Release
+      ARCH: x64
 
     steps:
-      - name: configure
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: clone
-        run: |
-          git clone --depth 1 --branch ${{ matrix.node_version }} https://github.com/nodejs/node.git node-src
-        working-directory: ${{ runner.temp }}
-
-      - name: 3. configure windows
-        if: matrix.os == 'windows-latest'
-        uses: microsoft/setup-msbuild@v2
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          msbuild-architecture: ${{ matrix.arch }}
+          python-version: '3.9'
 
-      - name: configure linux
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt update && sudo apt install -y build-essential python3 make gcc g++ cmake
+      - name: Install Ninja (optional)
+        run: choco install -y ninja
 
-      - name: configure macos
-        if: matrix.os == 'macos-latest'
-        run: |
-          xcode-select --install
+      - name: Configure (CMake)
+        run: cmake -S . -B out/build -G "Visual Studio 17 2022" -A ${{ env.ARCH }} -DCMAKE_BUILD_TYPE=${{ env.CONFIG }}
 
-      - name: 6. build
-        working-directory: ${{ runner.temp }}/node-src
-        run: |
-          if ($IsWindows) {
-            vcbuild.bat shared ${{ matrix.arch }} release
-          }
-          if ($IsLinux -or $IsMacOS) {
-            ./configure --shared --arch=${{ matrix.arch }}
-            make -j$(nproc) 
-          }
+      - name: Build (try libnode target, fallback to ALL_BUILD)
         shell: pwsh
-
-      - name: 7. search
-        id: find-libnode
-        working-directory: ${{ runner.temp }}/node-src
         run: |
-          if ($IsWindows) {
-            echo "libnode_path=out/Release/libnode.dll" >> $env:GITHUB_OUTPUT
-          }
-          if ($IsLinux) {
-            echo "libnode_path=out/Release/libnode.so" >> $env:GITHUB_OUTPUT
-          }
-          if ($IsMacOS) {
-            echo "libnode_path=out/Release/libnode.dylib" >> $env:GITHUB_OUTPUT
-          }
-        shell: pwsh
+          cmake --build out/build --config $env:CONFIG --target libnode -- /m || cmake --build out/build --config $env:CONFIG --target ALL_BUILD -- /m
 
-      - name: upload
+      - name: Verify libnode.dll exists
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem -Path out/build -Recurse -Filter libnode.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dll) { Write-Error "libnode.dll not found"; exit 1 }
+          Write-Host "Found libnode.dll at $($dll.FullName)"
+
+      - name: Upload libnode.dll artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libnode-${{ matrix.os }}-${{ matrix.node_version }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/node-src/${{ steps.find-libnode.outputs.libnode_path }}
-          retention-days: 30
+          name: libnode-dll
+          path: out/build/**/libnode.dll
